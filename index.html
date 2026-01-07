@@ -72,19 +72,24 @@ const App=()=>{
   const prev=()=>{setStep(p=>Math.max(p-1,0));window.scrollTo(0,0)};
 
   const handleSubmit=async()=>{
+    console.log('Submit clicked!');
+    console.log('GOOGLE_SCRIPT_URL:', GOOGLE_SCRIPT_URL);
     if(!d.certifyAccurate||!d.eSignature){
       alert('Please complete the certification and e-signature before submitting.');
       return;
     }
     setSubmitting(true);
+    console.log('Sending data...');
     try{
       const submitData={...d,submittedAt:new Date().toISOString()};
-      const response=await fetch(GOOGLE_SCRIPT_URL,{
+      console.log('Data:', submitData);
+      await fetch(GOOGLE_SCRIPT_URL,{
         method:'POST',
         mode:'no-cors',
         headers:{'Content-Type':'application/json'},
         body:JSON.stringify(submitData)
       });
+      console.log('Fetch complete!');
       setSubmitted(true);
     }catch(err){
       console.error('Submit error:',err);
