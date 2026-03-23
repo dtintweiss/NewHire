@@ -181,11 +181,8 @@ const EmployerForm = ({ supabase, token }) => {
         return;
       }
 
-      await fetch(`${SUPABASE_URL}/functions/v1/notify-new-hire`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ submissionId: submission.id })
-      });
+      // notify-new-hire is triggered automatically by the database trigger
+      // on_employer_complete_notify when status changes to 'employer_complete'
 
       setSubmitting(false);
       setSubmitSuccess(true);
