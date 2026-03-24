@@ -481,6 +481,16 @@ const employerStyles = {
     fontWeight: '600',
     transition: 'all 0.2s',
   },
+  validationBanner: {
+    backgroundColor: '#fff3e0',
+    border: '1px solid #ff9800',
+    borderRadius: '6px',
+    padding: '15px 20px',
+    marginBottom: '20px',
+    color: '#e65100',
+    fontSize: '14px',
+    lineHeight: '1.5',
+  },
   errorBox: {
     backgroundColor: '#fee',
     border: '1px solid #fcc',
