@@ -9,6 +9,7 @@ const EmployerForm = ({ supabase, token }) => {
   const [submitting, setSubmitting] = useState(false);
   const [submitSuccess, setSubmitSuccess] = useState(false);
   const [showPayNotice, setShowPayNotice] = useState(false);
+  const [validationErrors, setValidationErrors] = useState([]);
 
   const [formData, setFormData] = useState({
     company_code: '',
@@ -40,6 +41,36 @@ const EmployerForm = ({ supabase, token }) => {
     pay_notice_file_path: '',
   });
 
+  // Validation rules per step
+  const validateStep = (step) => {
+    const errors = [];
+    if (step === 2) {
+      if (!formData.company_code.trim()) errors.push('Company Code is required');
+      if (!formData.legal_name.trim()) errors.push('Legal Company Name is required');
+      if (!formData.ein.trim()) errors.push('EIN is required');
+      if (!formData.hire_type) errors.push('Hire Type is required');
+      if (!formData.employee_type) errors.push('Employee Type is required');
+    }
+    if (step === 3) {
+      if (!formData.job_title.trim()) errors.push('Job Title is required');
+      if (!formData.work_location.trim()) errors.push('Work Location is required');
+      if (!formData.pay_frequency) errors.push('Pay Frequency is required');
+      if (!formData.is_exempt) errors.push('Exempt Status is required');
+      if (formData.is_exempt === 'true' && !formData.annual_salary) errors.push('Annual Salary is required for exempt employees');
+      if (formData.is_exempt === 'false' && !formData.hourly_rate) errors.push('Hourly Rate is required for non-exempt employees');
+      if (formData.is_exempt === 'false' && !formData.standard_hours_per_week) errors.push('Standard Hours per Week is required for non-exempt employees');
+    }
+    if (step === 4) {
+      if (!formData.employer_name.trim()) errors.push('Employer Name is required');
+      if (!formData.employer_fein.trim()) errors.push('FEIN is required');
+      if (!formData.employer_address.trim()) errors.push('Business Address is required');
+      if (!formData.employer_phone.trim()) errors.push('Business Phone is required');
+      if (!formData.regular_payday.trim()) errors.push('Regular Payday is required');
+      if (!formData.primary_language) errors.push('Primary Language is required');
+    }
+    return errors;
+  };
+
   useEffect(() => {
     const loadSubmission = async () => {
       try {
@@ -52,6 +83,8 @@ const EmployerForm = ({ supabase, token }) => {
           return;
         }
 
+        console.log('[EmployerForm] Loading submission for token:', token);
+
         const { data, error: queryError } = await supabase
           .from('submissions')
           .select('*')
@@ -59,12 +92,21 @@ const EmployerForm = ({ supabase, token }) => {
           .eq('status', 'employee_complete')
           .single();
 
-        if (queryError || !data) {
+        if (queryError) {
+          console.error('[EmployerForm] Query error:', queryError);
           setError('Invalid, expired, or already used token. Please request a new link from the employee.');
           setLoading(false);
           return;
         }
 
+        if (!data) {
+          console.error('[EmployerForm] No data returned for token');
+          setError('Invalid, expired, or already used token. Please request a new link from the employee.');
+          setLoading(false);
+          return;
+        }
+
+        console.log('[EmployerForm] Submission loaded:', data.id, 'status:', data.status);
         setSubmission(data);
 
         if (data) {
@@ -80,7 +122,7 @@ const EmployerForm = ({ supabase, token }) => {
             supervisor_name: data.supervisor_name || '',
             work_location: data.work_location || '',
             pay_frequency: data.pay_frequency || '',
-            is_exempt: data.is_exempt !== null ? data.is_exempt : '',
+            is_exempt: data.is_exempt !== null && data.is_exempt !== undefined ? String(data.is_exempt) : '',
             annual_salary: data.annual_salary || '',
             hourly_rate: data.hourly_rate || '',
             standard_hours_per_week: data.standard_hours_per_week || '',
@@ -102,6 +144,7 @@ const EmployerForm = ({ supabase, token }) => {
 
         setLoading(false);
       } catch (err) {
+        console.error('[EmployerForm] Load error:', err);
         setError(`Error loading submission: ${err.message}`);
         setLoading(false);
       }
@@ -116,6 +159,10 @@ const EmployerForm = ({ supabase, token }) => {
       ...prev,
       [name]: type === 'checkbox' ? checked : value,
     }));
+    // Clear validation errors when user starts typing
+    if (validationErrors.length > 0) {
+      setValidationErrors([]);
+    }
   };
 
   const maskSSN = (ssn) => {
@@ -128,58 +175,107 @@ const EmployerForm = ({ supabase, token }) => {
     return `****${account.slice(-4)}`;
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const formatCurrency = (value) => {
+    const num = parseFloat(value);
+    if (isNaN(num)) return 'Not specified';
+    return '$' + num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  };
 
-    if (currentStep < 5) {
-      setCurrentStep(currentStep + 1);
+  const handleNext = () => {
+    // Step 1 is review-only, no validation needed
+    if (currentStep === 1) {
+      setValidationErrors([]);
+      setCurrentStep(2);
+      window.scrollTo(0, 0);
       return;
     }
 
+    // Validate current step
+    const errors = validateStep(currentStep);
+    if (errors.length > 0) {
+      setValidationErrors(errors);
+      window.scrollTo(0, 0);
+      return;
+    }
+
+    setValidationErrors([]);
+    setCurrentStep(currentStep + 1);
+    window.scrollTo(0, 0);
+  };
+
+  const handlePrevious = () => {
+    setValidationErrors([]);
+    setCurrentStep(currentStep - 1);
+    window.scrollTo(0, 0);
+  };
+
+  const handleSubmit = async () => {
     try {
       setSubmitting(true);
       setError(null);
+      setValidationErrors([]);
 
-      const { error: updateError } = await supabase
+      console.log('[EmployerForm] Submitting update for submission:', submission.id);
+      console.log('[EmployerForm] Form data:', JSON.stringify(formData, null, 2));
+
+      const updatePayload = {
+        company_code: formData.company_code,
+        legal_name: formData.legal_name,
+        ein: formData.ein,
+        hire_type: formData.hire_type,
+        employee_type: formData.employee_type,
+        job_title: formData.job_title,
+        department: formData.department,
+        supervisor_name: formData.supervisor_name,
+        work_location: formData.work_location,
+        pay_frequency: formData.pay_frequency,
+        is_exempt: formData.is_exempt === '' ? null : formData.is_exempt === 'true',
+        annual_salary: formData.annual_salary ? parseFloat(formData.annual_salary) : null,
+        hourly_rate: formData.hourly_rate ? parseFloat(formData.hourly_rate) : null,
+        standard_hours_per_week: formData.standard_hours_per_week ? parseFloat(formData.standard_hours_per_week) : null,
+        employer_name: formData.employer_name,
+        employer_dba: formData.employer_dba,
+        employer_fein: formData.employer_fein,
+        employer_address: formData.employer_address,
+        employer_phone: formData.employer_phone,
+        regular_payday: formData.regular_payday,
+        allowances_taken: formData.allowances_taken,
+        tip_allowance: formData.tip_allowance,
+        meal_allowance: formData.meal_allowance,
+        lodging_allowance: formData.lodging_allowance,
+        primary_language: formData.primary_language,
+        other_language: formData.other_language,
+        pay_notice_file_path: formData.pay_notice_file_path,
+        status: 'employer_complete',
+        updated_at: new Date().toISOString(),
+      };
+
+      console.log('[EmployerForm] Update payload:', JSON.stringify(updatePayload, null, 2));
+
+      const { data: updateData, error: updateError } = await supabase
         .from('submissions')
-        .update({
-          company_code: formData.company_code,
-          legal_name: formData.legal_name,
-          ein: formData.ein,
-          hire_type: formData.hire_type,
-          employee_type: formData.employee_type,
-          job_title: formData.job_title,
-          department: formData.department,
-          supervisor_name: formData.supervisor_name,
-          work_location: formData.work_location,
-          pay_frequency: formData.pay_frequency,
-          is_exempt: formData.is_exempt === '' ? null : formData.is_exempt === 'true',
-          annual_salary: formData.annual_salary ? parseFloat(formData.annual_salary) : null,
-          hourly_rate: formData.hourly_rate ? parseFloat(formData.hourly_rate) : null,
-          standard_hours_per_week: formData.standard_hours_per_week ? parseFloat(formData.standard_hours_per_week) : null,
-          employer_name: formData.employer_name,
-          employer_dba: formData.employer_dba,
-          employer_fein: formData.employer_fein,
-          employer_address: formData.employer_address,
-          employer_phone: formData.employer_phone,
-          regular_payday: formData.regular_payday,
-          allowances_taken: formData.allowances_taken,
-          tip_allowance: formData.tip_allowance,
-          meal_allowance: formData.meal_allowance,
-          lodging_allowance: formData.lodging_allowance,
-          primary_language: formData.primary_language,
-          other_language: formData.other_language,
-          pay_notice_file_path: formData.pay_notice_file_path,
-          status: 'employer_complete',
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', submission.id);
+        .update(updatePayload)
+        .eq('id', submission.id)
+        .select();
+
+      console.log('[EmployerForm] Update result - data:', updateData, 'error:', updateError);
 
       if (updateError) {
+        console.error('[EmployerForm] Update error:', updateError);
         setError(`Failed to update submission: ${updateError.message}`);
         setSubmitting(false);
         return;
       }
+
+      // Check if the update actually affected a row
+      if (!updateData || updateData.length === 0) {
+        console.error('[EmployerForm] Update returned no rows — possible RLS policy rejection');
+        setError('Submission could not be saved. The link may have expired or already been used. Please request a new employer link.');
+        setSubmitting(false);
+        return;
+      }
+
+      console.log('[EmployerForm] Update successful, row returned:', updateData[0]?.id);
 
       // notify-new-hire is triggered automatically by the database trigger
       // on_employer_complete_notify when status changes to 'employer_complete'
@@ -187,6 +283,7 @@ const EmployerForm = ({ supabase, token }) => {
       setSubmitting(false);
       setSubmitSuccess(true);
     } catch (err) {
+      console.error('[EmployerForm] Submit exception:', err);
       setError(`Error submitting form: ${err.message}`);
       setSubmitting(false);
     }
@@ -219,7 +316,7 @@ const EmployerForm = ({ supabase, token }) => {
     return (
       <div style={employerStyles.container}>
         <div style={employerStyles.successBox}>
-          <div style={employerStyles.successIcon}>✓</div>
+          <div style={employerStyles.successIcon}>&#10003;</div>
           <h2>Form Submitted Successfully</h2>
           <p>Thank you for completing the employer information. Your submission has been received and processed.</p>
           <p style={employerStyles.successSubtext}>
@@ -239,7 +336,7 @@ const EmployerForm = ({ supabase, token }) => {
           style={employerStyles.logo}
         />
         <h1>Employer Onboarding</h1>
-        <p>Phase 2: Company & Position Information</p>
+        <p>Phase 2: Company &amp; Position Information</p>
       </div>
 
       <div style={employerStyles.progressBar}>
@@ -257,13 +354,24 @@ const EmployerForm = ({ supabase, token }) => {
         ))}
       </div>
 
+      {validationErrors.length > 0 && (
+        <div style={employerStyles.validationBanner}>
+          <p style={{ fontWeight: 'bold', marginBottom: '8px' }}>Please fix the following before continuing:</p>
+          <ul style={{ margin: 0, paddingLeft: '20px' }}>
+            {validationErrors.map((err, i) => (
+              <li key={i} style={{ marginBottom: '4px' }}>{err}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {error && (
         <div style={employerStyles.errorBanner}>
           <p>{error}</p>
         </div>
       )}
 
-      <form onSubmit={handleSubmit} style={employerStyles.form}>
+      <div style={employerStyles.form}>
         {currentStep === 1 && (
           <div style={employerStyles.step}>
             <h2>Employee Information Summary</h2>
@@ -316,52 +424,48 @@ const EmployerForm = ({ supabase, token }) => {
             <h2>Company Information</h2>
 
             <div style={employerStyles.formGroup}>
-              <label>Company Code *</label>
+              <label>Company Code <span style={{color:'#d32f2f'}}>*</span></label>
               <input
                 type="text"
                 name="company_code"
                 value={formData.company_code}
                 onChange={handleInputChange}
                 placeholder="e.g., ABC-2025"
-                required
                 style={employerStyles.input}
               />
             </div>
 
             <div style={employerStyles.formGroup}>
-              <label>Legal Company Name *</label>
+              <label>Legal Company Name <span style={{color:'#d32f2f'}}>*</span></label>
               <input
                 type="text"
                 name="legal_name"
                 value={formData.legal_name}
                 onChange={handleInputChange}
                 placeholder="Full legal company name"
-                required
                 style={employerStyles.input}
               />
             </div>
 
             <div style={employerStyles.formGroup}>
-              <label>EIN (Employer Identification Number) *</label>
+              <label>EIN (Employer Identification Number) <span style={{color:'#d32f2f'}}>*</span></label>
               <input
                 type="text"
                 name="ein"
                 value={formData.ein}
                 onChange={handleInputChange}
                 placeholder="00-0000000"
-                required
                 style={employerStyles.input}
               />
             </div>
 
             <div style={employerStyles.formRow}>
               <div style={employerStyles.formGroup}>
-                <label>Hire Type *</label>
+                <label>Hire Type <span style={{color:'#d32f2f'}}>*</span></label>
                 <select
                   name="hire_type"
                   value={formData.hire_type}
                   onChange={handleInputChange}
-                  required
                   style={employerStyles.input}
                 >
                   <option value="">Select...</option>
@@ -372,12 +476,11 @@ const EmployerForm = ({ supabase, token }) => {
               </div>
 
               <div style={employerStyles.formGroup}>
-                <label>Employee Type *</label>
+                <label>Employee Type <span style={{color:'#d32f2f'}}>*</span></label>
                 <select
                   name="employee_type"
                   value={formData.employee_type}
                   onChange={handleInputChange}
-                  required
                   style={employerStyles.input}
                 >
                   <option value="">Select...</option>
@@ -393,17 +496,16 @@ const EmployerForm = ({ supabase, token }) => {
 
         {currentStep === 3 && (
           <div style={employerStyles.step}>
-            <h2>Position & Pay Information</h2>
+            <h2>Position &amp; Pay Information</h2>
 
             <div style={employerStyles.formGroup}>
-              <label>Job Title *</label>
+              <label>Job Title <span style={{color:'#d32f2f'}}>*</span></label>
               <input
                 type="text"
                 name="job_title"
                 value={formData.job_title}
                 onChange={handleInputChange}
                 placeholder="e.g., Software Engineer"
-                required
                 style={employerStyles.input}
               />
             </div>
@@ -433,26 +535,24 @@ const EmployerForm = ({ supabase, token }) => {
             </div>
 
             <div style={employerStyles.formGroup}>
-              <label>Work Location *</label>
+              <label>Work Location <span style={{color:'#d32f2f'}}>*</span></label>
               <input
                 type="text"
                 name="work_location"
                 value={formData.work_location}
                 onChange={handleInputChange}
                 placeholder="e.g., New York, NY Office"
-                required
                 style={employerStyles.input}
               />
             </div>
 
             <div style={employerStyles.formRow}>
               <div style={employerStyles.formGroup}>
-                <label>Pay Frequency *</label>
+                <label>Pay Frequency <span style={{color:'#d32f2f'}}>*</span></label>
                 <select
                   name="pay_frequency"
                   value={formData.pay_frequency}
                   onChange={handleInputChange}
-                  required
                   style={employerStyles.input}
                 >
                   <option value="">Select...</option>
@@ -464,12 +564,11 @@ const EmployerForm = ({ supabase, token }) => {
               </div>
 
               <div style={employerStyles.formGroup}>
-                <label>Exempt Status *</label>
+                <label>Exempt Status <span style={{color:'#d32f2f'}}>*</span></label>
                 <select
                   name="is_exempt"
                   value={formData.is_exempt}
                   onChange={handleInputChange}
-                  required
                   style={employerStyles.input}
                 >
                   <option value="">Select...</option>
@@ -481,7 +580,7 @@ const EmployerForm = ({ supabase, token }) => {
 
             {formData.is_exempt === 'true' && (
               <div style={employerStyles.formGroup}>
-                <label>Annual Salary *</label>
+                <label>Annual Salary <span style={{color:'#d32f2f'}}>*</span></label>
                 <input
                   type="number"
                   name="annual_salary"
@@ -489,7 +588,6 @@ const EmployerForm = ({ supabase, token }) => {
                   onChange={handleInputChange}
                   placeholder="e.g., 75000"
                   step="0.01"
-                  required
                   style={employerStyles.input}
                 />
               </div>
@@ -498,7 +596,7 @@ const EmployerForm = ({ supabase, token }) => {
             {formData.is_exempt === 'false' && (
               <div style={employerStyles.formRow}>
                 <div style={employerStyles.formGroup}>
-                  <label>Hourly Rate *</label>
+                  <label>Hourly Rate <span style={{color:'#d32f2f'}}>*</span></label>
                   <input
                     type="number"
                     name="hourly_rate"
@@ -506,13 +604,12 @@ const EmployerForm = ({ supabase, token }) => {
                     onChange={handleInputChange}
                     placeholder="e.g., 25.00"
                     step="0.01"
-                    required
                     style={employerStyles.input}
                   />
                 </div>
 
                 <div style={employerStyles.formGroup}>
-                  <label>Standard Hours per Week *</label>
+                  <label>Standard Hours per Week <span style={{color:'#d32f2f'}}>*</span></label>
                   <input
                     type="number"
                     name="standard_hours_per_week"
@@ -520,7 +617,6 @@ const EmployerForm = ({ supabase, token }) => {
                     onChange={handleInputChange}
                     placeholder="e.g., 40"
                     step="0.5"
-                    required
                     style={employerStyles.input}
                   />
                 </div>
@@ -531,17 +627,16 @@ const EmployerForm = ({ supabase, token }) => {
 
         {currentStep === 4 && (
           <div style={employerStyles.step}>
-            <h2>Employer Information & NY Pay Notice</h2>
+            <h2>Employer Information &amp; NY Pay Notice</h2>
 
             <div style={employerStyles.formGroup}>
-              <label>Employer Name *</label>
+              <label>Employer Name <span style={{color:'#d32f2f'}}>*</span></label>
               <input
                 type="text"
                 name="employer_name"
                 value={formData.employer_name}
                 onChange={handleInputChange}
                 placeholder="Official employer name"
-                required
                 style={employerStyles.input}
               />
             </div>
@@ -559,52 +654,48 @@ const EmployerForm = ({ supabase, token }) => {
             </div>
 
             <div style={employerStyles.formGroup}>
-              <label>FEIN *</label>
+              <label>FEIN <span style={{color:'#d32f2f'}}>*</span></label>
               <input
                 type="text"
                 name="employer_fein"
                 value={formData.employer_fein}
                 onChange={handleInputChange}
                 placeholder="Federal Employer ID"
-                required
                 style={employerStyles.input}
               />
             </div>
 
             <div style={employerStyles.formGroup}>
-              <label>Business Address *</label>
+              <label>Business Address <span style={{color:'#d32f2f'}}>*</span></label>
               <textarea
                 name="employer_address"
                 value={formData.employer_address}
                 onChange={handleInputChange}
                 placeholder="Street address, city, state, zip"
-                required
                 style={{ ...employerStyles.input, minHeight: '80px' }}
               />
             </div>
 
             <div style={employerStyles.formGroup}>
-              <label>Business Phone *</label>
+              <label>Business Phone <span style={{color:'#d32f2f'}}>*</span></label>
               <input
                 type="tel"
                 name="employer_phone"
                 value={formData.employer_phone}
                 onChange={handleInputChange}
                 placeholder="(555) 123-4567"
-                required
                 style={employerStyles.input}
               />
             </div>
 
             <div style={employerStyles.formGroup}>
-              <label>Regular Payday *</label>
+              <label>Regular Payday <span style={{color:'#d32f2f'}}>*</span></label>
               <input
                 type="text"
                 name="regular_payday"
                 value={formData.regular_payday}
                 onChange={handleInputChange}
                 placeholder="e.g., Friday of each week"
-                required
                 style={employerStyles.input}
               />
             </div>
@@ -704,12 +795,11 @@ const EmployerForm = ({ supabase, token }) => {
             )}
 
             <div style={employerStyles.formGroup}>
-              <label>Primary Language of Communication *</label>
+              <label>Primary Language of Communication <span style={{color:'#d32f2f'}}>*</span></label>
               <select
                 name="primary_language"
                 value={formData.primary_language}
                 onChange={handleInputChange}
-                required
                 style={employerStyles.input}
               >
                 <option value="">Select...</option>
@@ -744,50 +834,51 @@ const EmployerForm = ({ supabase, token }) => {
 
         {currentStep === 5 && (
           <div style={employerStyles.step}>
-            <h2>Certification & Submission</h2>
+            <h2>Certification &amp; Submission</h2>
 
             <div style={employerStyles.reviewSection}>
               <h3>Review Your Information</h3>
 
               <div style={employerStyles.reviewCategory}>
                 <h4>Company Information</h4>
-                <p><strong>Company Code:</strong> {formData.company_code}</p>
-                <p><strong>Legal Name:</strong> {formData.legal_name}</p>
-                <p><strong>EIN:</strong> {formData.ein}</p>
-                <p><strong>Hire Type:</strong> {formData.hire_type}</p>
-                <p><strong>Employee Type:</strong> {formData.employee_type}</p>
+                <p><strong>Company Code:</strong> {formData.company_code || 'Not specified'}</p>
+                <p><strong>Legal Name:</strong> {formData.legal_name || 'Not specified'}</p>
+                <p><strong>EIN:</strong> {formData.ein || 'Not specified'}</p>
+                <p><strong>Hire Type:</strong> {formData.hire_type || 'Not specified'}</p>
+                <p><strong>Employee Type:</strong> {formData.employee_type || 'Not specified'}</p>
               </div>
 
               <div style={employerStyles.reviewCategory}>
-                <h4>Position & Pay</h4>
-                <p><strong>Job Title:</strong> {formData.job_title}</p>
+                <h4>Position &amp; Pay</h4>
+                <p><strong>Job Title:</strong> {formData.job_title || 'Not specified'}</p>
                 <p><strong>Department:</strong> {formData.department || 'Not specified'}</p>
                 <p><strong>Supervisor:</strong> {formData.supervisor_name || 'Not specified'}</p>
-                <p><strong>Work Location:</strong> {formData.work_location}</p>
-                <p><strong>Pay Frequency:</strong> {formData.pay_frequency}</p>
-                <p><strong>Status:</strong> {formData.is_exempt === 'true' ? 'Exempt (Salary)' : 'Non-Exempt (Hourly)'}</p>
-                {formData.is_exempt === 'true' ? (
-                  <p><strong>Annual Salary:</strong> ${parseFloat(formData.annual_salary).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-                ) : (
+                <p><strong>Work Location:</strong> {formData.work_location || 'Not specified'}</p>
+                <p><strong>Pay Frequency:</strong> {formData.pay_frequency || 'Not specified'}</p>
+                <p><strong>Status:</strong> {formData.is_exempt === 'true' ? 'Exempt (Salary)' : formData.is_exempt === 'false' ? 'Non-Exempt (Hourly)' : 'Not specified'}</p>
+                {formData.is_exempt === 'true' && (
+                  <p><strong>Annual Salary:</strong> {formatCurrency(formData.annual_salary)}</p>
+                )}
+                {formData.is_exempt === 'false' && (
                   <>
-                    <p><strong>Hourly Rate:</strong> ${parseFloat(formData.hourly_rate).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}/hr</p>
-                    <p><strong>Standard Hours/Week:</strong> {formData.standard_hours_per_week}</p>
+                    <p><strong>Hourly Rate:</strong> {formatCurrency(formData.hourly_rate)}/hr</p>
+                    <p><strong>Standard Hours/Week:</strong> {formData.standard_hours_per_week || 'Not specified'}</p>
                   </>
                 )}
               </div>
 
               <div style={employerStyles.reviewCategory}>
                 <h4>Employer Information</h4>
-                <p><strong>Employer Name:</strong> {formData.employer_name}</p>
+                <p><strong>Employer Name:</strong> {formData.employer_name || 'Not specified'}</p>
                 <p><strong>DBA:</strong> {formData.employer_dba || 'Not specified'}</p>
-                <p><strong>FEIN:</strong> {formData.employer_fein}</p>
-                <p><strong>Address:</strong> {formData.employer_address.replace(/\n/g, ', ')}</p>
-                <p><strong>Phone:</strong> {formData.employer_phone}</p>
-                <p><strong>Regular Payday:</strong> {formData.regular_payday}</p>
+                <p><strong>FEIN:</strong> {formData.employer_fein || 'Not specified'}</p>
+                <p><strong>Address:</strong> {(formData.employer_address || 'Not specified').replace(/\n/g, ', ')}</p>
+                <p><strong>Phone:</strong> {formData.employer_phone || 'Not specified'}</p>
+                <p><strong>Regular Payday:</strong> {formData.regular_payday || 'Not specified'}</p>
               </div>
 
               <div style={employerStyles.reviewCategory}>
-                <h4>Pay Notice & Language</h4>
+                <h4>Pay Notice &amp; Language</h4>
                 <p><strong>Allowances Taken:</strong> {formData.allowances_taken ? 'Yes' : 'No'}</p>
                 {formData.allowances_taken && (
                   <p>
@@ -796,11 +887,11 @@ const EmployerForm = ({ supabase, token }) => {
                         formData.tip_allowance && 'Tips',
                         formData.meal_allowance && 'Meals',
                         formData.lodging_allowance && 'Lodging'
-                      ].filter(Boolean).join(', ')
+                      ].filter(Boolean).join(', ') || 'None selected'
                     }
                   </p>
                 )}
-                <p><strong>Primary Language:</strong> {formData.primary_language}</p>
+                <p><strong>Primary Language:</strong> {formData.primary_language || 'Not specified'}</p>
                 {formData.other_language && (
                   <p><strong>Other Language:</strong> {formData.other_language}</p>
                 )}
@@ -828,7 +919,7 @@ const EmployerForm = ({ supabase, token }) => {
           {currentStep > 1 && (
             <button
               type="button"
-              onClick={() => setCurrentStep(currentStep - 1)}
+              onClick={handlePrevious}
               style={employerStyles.buttonSecondary}
               disabled={submitting}
             >
@@ -836,15 +927,26 @@ const EmployerForm = ({ supabase, token }) => {
             </button>
           )}
 
-          <button
-            type="submit"
-            style={employerStyles.buttonPrimary}
-            disabled={submitting}
-          >
-            {submitting ? 'Submitting...' : currentStep < 5 ? 'Next' : 'Submit & Complete'}
-          </button>
+          {currentStep < 5 ? (
+            <button
+              type="button"
+              onClick={handleNext}
+              style={employerStyles.buttonPrimary}
+            >
+              Next
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={handleSubmit}
+              style={employerStyles.buttonPrimary}
+              disabled={submitting}
+            >
+              {submitting ? 'Submitting...' : 'Submit & Complete'}
+            </button>
+          )}
         </div>
-      </form>
+      </div>
 
       {error && (
         <div style={employerStyles.errorBannerBottom}>
