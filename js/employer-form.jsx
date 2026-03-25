@@ -247,7 +247,7 @@ const EmployerForm = ({ supabase, token }) => {
         other_language: formData.other_language,
         pay_notice_file_path: formData.pay_notice_file_path,
         status: 'employer_complete',
-        updated_at: new Date().toISOString(),
+        employer_submitted_at: new Date().toISOString(),
       };
 
       console.log('[EmployerForm] Update payload:', JSON.stringify(updatePayload, null, 2));
